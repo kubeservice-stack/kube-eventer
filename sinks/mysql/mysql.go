@@ -16,13 +16,14 @@ package mysql
 
 import (
 	"encoding/json"
+	"net/url"
+	"sync"
+
 	mysql_common "github.com/AliyunContainerService/kube-eventer/common/mysql"
 	"github.com/AliyunContainerService/kube-eventer/core"
 	"github.com/AliyunContainerService/kube-eventer/util"
 	kube_api "k8s.io/api/core/v1"
 	"k8s.io/klog"
-	"net/url"
-	"sync"
 )
 
 // SaveDataFunc is a pluggable function to enforce limits on the object
@@ -65,8 +66,7 @@ func getEventValue(event *kube_api.Event) (string, error) {
 	return string(bytes), nil
 }
 
-func eventToPoint(event *kube_api.Event) (*mysql_common.MysqlKubeEventPoint, error) {
-
+func (sink *mysqlSink) EventToPoint(event *kube_api.Event) (*mysql_common.MysqlKubeEventPoint, error) {
 	value, err := getEventValue(event)
 	if err != nil {
 		return nil, err
@@ -75,12 +75,14 @@ func eventToPoint(event *kube_api.Event) (*mysql_common.MysqlKubeEventPoint, err
 
 	point := mysql_common.MysqlKubeEventPoint{
 		Name:                     event.InvolvedObject.Name,
+		Cluster:                  sink.mysqlSvc.Cluster,
 		Namespace:                event.InvolvedObject.Namespace,
 		EventID:                  string(event.UID),
 		Type:                     event.Type,
 		Reason:                   event.Reason,
 		Message:                  event.Message,
 		Kind:                     event.InvolvedObject.Kind,
+		Source:                   event.Source.Component,
 		FirstOccurrenceTimestamp: event.FirstTimestamp.Time.String(),
 		LastOccurrenceTimestamp:  util.GetLastEventTimestamp(event).String(),
 	}
@@ -97,7 +99,7 @@ func (sink *mysqlSink) ExportEvents(eventBatch *core.EventBatch) {
 	dataPoints := make([]mysql_common.MysqlKubeEventPoint, 0, 10)
 	for _, event := range eventBatch.Events {
 
-		point, err := eventToPoint(event)
+		point, err := sink.EventToPoint(event)
 		if err != nil {
 			klog.Warningf("Failed to convert event to point: %v", err)
 			klog.Warningf("Skip this event")
